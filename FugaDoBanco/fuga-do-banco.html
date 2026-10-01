@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fuga do Banco</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0b0d14; }
+  body { display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  canvas { display: block; width: min(100vw, calc(100vh * 10 / 7)); height: auto; aspect-ratio: 10 / 7; image-rendering: auto; outline: none; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1000" height="700" tabindex="0"></canvas>
+<script>
+"use strict";
+// Fuga do Banco - furtividade top-down. Arquivo unico: abra no navegador e jogue.
+const W = 1000, H = 700, T = 40, TOP = 60;                 // tela, tile, altura do HUD
+const MAPA = [                                              // # parede, D mesa, E saida
+  "#########################",
+  "#.....DD#.......#.......#",
+  "#.......#.......#...DD..#",
+  "#.......#...D...#.......#",
+  "#.......#.......#.......#",
+  "#.......#.......#.......#",
+  "###.#######.#######.#####",
+  "#................D......#",
+  "#.....D.................#",
+  "###.#######.#######.#####",
+  "#.......#.......#.......#",
+  "#....DD.#.......#.......#",
+  "#.......#.......#.......#",
+  "#.......#.....DD#.......#",
+  "#.......#.......#......E#",
+  "#########################"];
+const ROWS = MAPA.length, COLS = MAPA[0].length;
+const VEL_JOGADOR = 200, VEL_PATRULHA = 95, VEL_PERSEGUICAO = 175, TEMPO_BASE = 150;
+const FOV_GUARDA = 70 * Math.PI / 180, ALCANCE_GUARDA = 230, FOV_CAM = 50 * Math.PI / 180, ALCANCE_CAM = 240;
+const rad = d => d * Math.PI / 180, dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+
+const centro = (c, r) => [c * T + T / 2, r * T + T / 2 + TOP];
+const tile = p => [Math.floor(p[0] / T), Math.floor((p[1] - TOP) / T)];
+const solido = (c, r) => c < 0 || c >= COLS || r < 0 || r >= ROWS || "#D".includes(MAPA[r][c]);
+const solidoEm = p => solido(...tile(p));
+
+// Move um eixo por vez: o jogador desliza nas paredes.
+function mover(pos, dx, dy, m = 10) {
+  for (const [ddx, ddy] of [[dx, 0], [0, dy]]) {
+    const n = [pos[0] + ddx, pos[1] + ddy];
+    if (![-1, 1].some(sx => [-1, 1].some(sy => solidoEm([n[0] + sx * m, n[1] + sy * m])))) pos = n;
+  }
+  return pos;
+}
+function linhaLivre(a, b) {
+  const n = Math.floor(dist(a, b) / 8) + 1;
+  for (let i = 0; i <= n; i++) if (solidoEm([a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n])) return false;
+  return true;
+}
+// Alcance + campo de visao + sem parede no caminho.
+function enxerga(o, ang, fov, alcance, p) {
+  if (dist(o, p) > alcance) return false;
+  const dif = ((Math.atan2(p[1] - o[1], p[0] - o[0]) - ang + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
+  return Math.abs(dif) < fov / 2 && linhaLivre(o, p);
+}
+// Poligono do cone de visao, cortado pelas paredes.
+function cone(o, ang, fov, alcance, raios = 14) {
+  const pts = [o];
+  for (let i = 0; i <= raios; i++) {
+    const a = ang - fov / 2 + fov * i / raios; let r = 0;
+    while (r < alcance && !solidoEm([o[0] + Math.cos(a) * r, o[1] + Math.sin(a) * r])) r += 6;
+    pts.push([o[0] + Math.cos(a) * r, o[1] + Math.sin(a) * r]);
+  }
+  return pts;
+}
+// BFS no grid: proximo tile do caminho src -> dst.
+function proximoPasso(src, dst) {
+  const key = c => c[0] + "," + c[1], prev = new Map([[key(src), null]]), fila = [src];
+  for (let k = 0; k < fila.length && !prev.has(key(dst)); k++) {
+    const c = fila[k];
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const n = [c[0] + dx, c[1] + dy];
+      if (!prev.has(key(n)) && !solido(...n)) { prev.set(key(n), c); fila.push(n); }
+    }
+  }
+  if (!prev.has(key(dst)) || key(dst) === key(src)) return src;
+  while (key(prev.get(key(dst))) !== key(src)) dst = prev.get(key(dst));
+  return dst;
+}
+
+let ac = null;
+function beep(freqs, ms = 90) {
+  try {
+    ac = ac || new AudioContext(); const t = ac.currentTime;
+    freqs.forEach((f, i) => {
+      const o = ac.createOscillator(), g = ac.createGain(), t0 = t + i * ms / 1000;
+      o.frequency.value = f; g.gain.setValueAtTime(.12, t0); g.gain.exponentialRampToValueAtTime(.001, t0 + ms / 1000);
+      o.connect(g); g.connect(ac.destination); o.start(t0); o.stop(t0 + ms / 1000);
+    });
+  } catch (e) { /* sem audio: o jogo segue normalmente */ }
+}
+
+const cv = document.getElementById("c"), ctx = cv.getContext("2d");
+const keys = new Set(), apertou = [];
+function texto(s, tam, cor, x, y, al = "center") {
+  ctx.font = `bold ${tam}px Consolas, "DejaVu Sans Mono", monospace`;
+  ctx.fillStyle = cor; ctx.textAlign = al; ctx.textBaseline = "middle"; ctx.fillText(s, x, y);
+}
+const circulo = (x, y, r, fill, stroke, lw = 2) => {
+  ctx.beginPath(); ctx.arc(x, y, r, 0, 7);
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lw; ctx.stroke(); }
+};
+
+class Player {
+  constructor(pos) { this.pos = [...pos]; this.anim = 0; this.dir = [1, 0]; }
+  update(dt) {
+    const dx = (keys.has("KeyD") ? 1 : 0) - (keys.has("KeyA") ? 1 : 0), dy = (keys.has("KeyS") ? 1 : 0) - (keys.has("KeyW") ? 1 : 0);
+    if (dx || dy) {
+      const n = Math.hypot(dx, dy); this.dir = [dx / n, dy / n]; this.anim += dt * 12;
+      this.pos = mover(this.pos, this.dir[0] * VEL_JOGADOR * dt, this.dir[1] * VEL_JOGADOR * dt);
+    }
+  }
+  draw() {
+    const [x, y] = this.pos, b = Math.sin(this.anim) * 3, hx = x + this.dir[0] * 4, hy = y + this.dir[1] * 4 + b;
+    ctx.fillStyle = "#14141a"; ctx.beginPath(); ctx.ellipse(x, y + 10, 11, 5, 0, 0, 7); ctx.fill();
+    circulo(x, y + b, 12, "#23232d"); circulo(hx, hy, 7, "#e1be96");
+    ctx.fillStyle = "#0f0f14"; ctx.fillRect(hx - 7, hy - 3, 14, 5);               // mascara
+    circulo(x, y + b, 12, null, "#e6e6f0");
+  }
+}
+
+class Guard {
+  constructor(rota, mult) {
+    this.rota = rota.map(t => centro(...t)); this.i = 0; this.passo = 1; this.pos = [...this.rota[0]];
+    this.ang = 0; this.estado = "PATROL"; this.t = 0; this.mult = mult; this.visto = false; this.ultimo = null;
+  }
+  irPara(alvo, vel, dt) {
+    const s = tile(this.pos), t = tile(alvo);
+    const meta = (s[0] === t[0] && s[1] === t[1]) ? alvo : centro(...proximoPasso(s, t)), d = dist(this.pos, meta);
+    if (d > 1) {
+      this.ang = Math.atan2(meta[1] - this.pos[1], meta[0] - this.pos[0]); const k = Math.min(vel * dt, d) / d;
+      this.pos = [this.pos[0] + (meta[0] - this.pos[0]) * k, this.pos[1] + (meta[1] - this.pos[1]) * k];
+    }
+    return dist(this.pos, alvo);
+  }
+  update(dt, alvo, forcado) {
+    this.visto = enxerga(this.pos, this.ang, FOV_GUARDA, ALCANCE_GUARDA, alvo);
+    if (this.estado === "PATROL") {
+      if (this.irPara(this.rota[this.i], VEL_PATRULHA * this.mult, dt) < 6) {
+        if (this.i + this.passo < 0 || this.i + this.passo >= this.rota.length) this.passo *= -1;   // A->B->C->B->A
+        this.i += this.passo;
+      }
+      if (this.visto) { this.estado = "DETECT"; this.t = 0; } else if (forcado) { this.estado = "CHASE"; this.t = 0; }
+    } else if (this.estado === "DETECT") {                         // para e encara por 0,5s
+      this.t += dt; this.ang = Math.atan2(alvo[1] - this.pos[1], alvo[0] - this.pos[0]);
+      if (this.t > .5) { this.estado = this.visto ? "CHASE" : "PATROL"; this.t = 0; }
+    } else {
+      if (this.visto) { this.t = 0; this.ultimo = [...alvo]; } else this.t += dt;
+      if (!this.ultimo) this.ultimo = [...alvo];
+      this.irPara(this.ultimo, VEL_PERSEGUICAO * this.mult, dt);
+      if (this.t > 3) { this.estado = "PATROL"; this.ultimo = null; }   // perdeu o jogador
+    }
+  }
+  draw() {
+    const [x, y] = this.pos, chase = this.estado === "CHASE";
+    circulo(x, y, 13, chase ? "#c82828" : "#325ab4", "#f0f0fa");
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(x, y);
+    ctx.lineTo(x + Math.cos(this.ang) * 16, y + Math.sin(this.ang) * 16); ctx.stroke();
+    ctx.fillStyle = "#141932"; ctx.fillRect(x - 9, y - 16, 18, 5);                 // bone
+    if (this.estado !== "PATROL") texto(chase ? "!" : "?", 26, chase ? "#ff4646" : "#ffe65a", x, y - 28);
+  }
+}
+
+class Camera {
+  constructor(t, a0, a1, mult) { this.pos = centro(...t); this.mid = rad((a0 + a1) / 2); this.amp = rad(Math.abs(a1 - a0) / 2); this.mult = mult; }
+  angulo(t) { return this.mid + this.amp * Math.sin(t * .8 * this.mult); }
+}
+
+function montarFundo() {
+  const bg = document.createElement("canvas"); bg.width = W; bg.height = H; const g = bg.getContext("2d");
+  g.fillStyle = "#12141c"; g.fillRect(0, 0, W, H);
+  const cor = (b, v) => `rgb(${b[0] + v},${b[1] + v},${b[2] + v})`;
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    const ch = MAPA[r][c], x = c * T, y = r * T + TOP;
+    const base = (c >= 17 && r <= 5) ? [84, 72, 44] : (r >= 7 && r <= 8) ? [62, 66, 84] : [48, 54, 66];
+    if (ch === "#") { g.fillStyle = "#343a4e"; g.fillRect(x, y, T, T); g.fillStyle = "#58607c"; g.fillRect(x, y, T, 6); }
+    else { g.fillStyle = cor(base, 6 * ((r + c) % 2)); g.fillRect(x, y, T, T); }
+    if (ch === "D") { g.fillStyle = "#6e4a2c"; g.fillRect(x + 3, y + 5, T - 6, T - 10); g.fillStyle = "#8c623c"; g.fillRect(x + 3, y + 5, T - 6, 6); }
+  }
+  g.font = "bold 14px Consolas, monospace"; g.fillStyle = "#e6dcb4"; g.textAlign = "center"; g.textBaseline = "middle";
+  for (const [n, p] of [["COFRE", [20, 5]], ["ENTRADA", [4, 14]], ["SAÍDA", [23, 13]]]) g.fillText(n, ...centro(...p));
+  return bg;
+}
+const BG = montarFundo();
+
+class Game {
+  constructor() { this.estado = "menu"; this.sel = 0; this.nivel = 0; this.motivo = ""; this.t = 0; }
+  novoJogo() {
+    const m = 1 + .12 * this.nivel;
+    this.p = new Player(centro(2, 13));
+    this.guardas = [new Guard([[2, 7], [12, 8], [22, 7]], m), new Guard([[10, 1], [14, 1], [14, 5], [10, 5]], m),
+                    new Guard([[18, 12], [22, 12], [22, 10], [18, 10]], m)];
+    this.cams = [new Camera([1, 1], 10, 80, m), new Camera([23, 1], 100, 170, m)];
+    this.sacos = [centro(3, 3), centro(20, 4), centro(11, 12)];
+    this.dinheiro = 0; this.alerta = 0; this.alertas = 0; this.armado = true;
+    this.tempo = TEMPO_BASE + 10 * this.nivel; this.t = 0; this.fx = []; this.pops = []; this.aviso = ""; this.estado = "jogo";
+  }
+  fim(estado, motivo = "") {
+    this.estado = estado; this.motivo = motivo;
+    if (estado === "derrota") beep([300, 200, 120], 160);
+    else {
+      beep([520, 660, 880], 120);
+      const cores = ["#ffd700", "#ffffff", "#50dc78"];
+      for (let i = 0; i < 120; i++) this.fx.push([500, 300, (Math.random() - .5) * 400, -Math.random() * 300, 1.6, cores[i % 3]]);
+    }
+  }
+  update(dt) {
+    const p = this.p; this.t += dt; this.tempo -= dt; p.update(dt);
+    for (const g of this.guardas) {
+      g.update(dt, p.pos, this.alerta >= 100 && dist(g.pos, p.pos) < 450);
+      if (dist(g.pos, p.pos) < 26) { if (g.estado === "CHASE") return this.fim("derrota", "VOCÊ FOI PEGO!"); g.estado = "CHASE"; }
+    }
+    const olhado = this.guardas.some(g => g.visto) ? 60 : this.cams.some(c => enxerga(c.pos, c.angulo(this.t), FOV_CAM, ALCANCE_CAM, p.pos)) ? 35 : 0;
+    this.alerta = Math.max(0, Math.min(100, this.alerta + (olhado || -12) * dt));
+    if (this.alerta >= 100 && this.armado) { this.armado = false; this.alertas++; beep([880, 660, 880]); }
+    this.armado = this.armado || this.alerta < 40;
+    this.aviso = this.sacos.some(s => dist(s, p.pos) < 48) ? "Pressione E para pegar" : "";
+    if (dist(p.pos, centro(23, 14)) < 34) {
+      if (this.dinheiro === 3) return this.fim("vitoria");
+      this.aviso = "Pegue todo o dinheiro antes de sair!";
+    }
+    if (this.tempo <= 0) return this.fim("derrota", "TEMPO ESGOTADO!");
+  }
+  coletar() {
+    const s = this.sacos.find(s => dist(s, this.p.pos) < 48); if (!s) return;
+    this.sacos.splice(this.sacos.indexOf(s), 1); this.dinheiro++; beep([990, 1320], 70); this.pops.push([s[0], s[1], 1.2]);
+    for (let i = 0; i < 14; i++) this.fx.push([s[0], s[1], (Math.random() - .5) * 180, -Math.random() * 120 + 20, .7, "#ffd700"]);
+  }
+  desenharJogo() {
+    ctx.drawImage(BG, 0, 0);
+    for (const g of this.guardas) poligono(cone(g.pos, g.ang, FOV_GUARDA, ALCANCE_GUARDA), g.estado === "CHASE" ? "rgba(255,60,60,.37)" : "rgba(255,230,90,.27)");
+    for (const c of this.cams) poligono(cone(c.pos, c.angulo(this.t), FOV_CAM, ALCANCE_CAM), this.alerta > 0 ? "rgba(255,60,60,.27)" : "rgba(90,220,255,.24)");
+    ctx.strokeStyle = `rgb(30,${Math.floor(180 + 60 * Math.sin(this.t * 5))},60)`; ctx.lineWidth = 3;      // saida
+    ctx.strokeRect(23 * T + 3, 14 * T + TOP + 3, T - 6, T - 6);
+    if (this.dinheiro === 3) { ctx.fillStyle = "rgba(60,255,120,.45)"; ctx.fillRect(23 * T + 3, 14 * T + TOP + 3, T - 6, T - 6); }
+    for (const c of this.cams) {
+      const a = c.angulo(this.t); circulo(c.pos[0], c.pos[1], 10, "#1e1e24");
+      ctx.strokeStyle = "#c83c3c"; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(...c.pos);
+      ctx.lineTo(c.pos[0] + Math.cos(a) * 14, c.pos[1] + Math.sin(a) * 14); ctx.stroke();
+    }
+    for (const s of this.sacos) {
+      const y = s[1] + Math.sin(this.t * 4) * 2; circulo(s[0], y, 15, "#c8a01e", "#ffdc46"); texto("$", 20, "#5a3c00", s[0], y);
+    }
+    this.p.draw(); this.guardas.forEach(g => g.draw());
+    if (this.alerta > 0) { ctx.fillStyle = `rgba(255,0,0,${this.alerta * .55 / 255})`; ctx.fillRect(0, 0, W, H); }
+    this.hud();
+  }
+  hud() {
+    ctx.fillStyle = "#0c0e16"; ctx.fillRect(0, 0, W, TOP);
+    const pronto = this.dinheiro === 3;
+    texto(`DINHEIRO: ${this.dinheiro}/3`, 22, "#ffd746", 20, 18, "left");
+    texto(pronto ? "OBJETIVO ATUAL: ESCAPE DO BANCO" : "OBJETIVO: roube os 3 sacos de dinheiro", 15, pronto ? "#78ff96" : "#bebed2", 20, 44, "left");
+    const t = Math.max(0, Math.floor(this.tempo));
+    texto(`TEMPO: ${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`, 22, t < 20 ? "#ff5a5a" : "#f0f0fa", 500, 30);
+    texto("ALERTA", 22, this.alerta >= 70 && Math.floor(this.t * 6) % 2 ? "#ff3c3c" : "#f0f0fa", 690, 30, "right");
+    for (let i = 0; i < 10; i++) {
+      ctx.fillStyle = i < Math.floor(this.alerta / 10 + .99) ? `rgb(${255 - i * 8},${230 - i * 20},60)` : "#2d303e";
+      ctx.fillRect(700 + i * 28, 16, 24, 28);
+    }
+    if (this.alerta >= 100) texto("PERSEGUIÇÃO!", 20, "#ff4646", 500, 90);
+    if (this.aviso) texto(this.aviso, 20, "#fff", Math.max(150, Math.min(850, this.p.pos[0])), this.p.pos[1] - 34);
+  }
+  efeitos(dt) {
+    for (const f of this.fx) { f[0] += f[2] * dt; f[1] += f[3] * dt; f[3] += 300 * dt; f[4] -= dt; circulo(f[0], f[1], 3, f[5]); }
+    this.fx = this.fx.filter(f => f[4] > 0);
+    for (const q of this.pops) { q[1] -= 40 * dt; q[2] -= dt; texto("+$10.000", 20, "#ffe65a", q[0], q[1]); }
+    this.pops = this.pops.filter(q => q[2] > 0);
+  }
+  veu(a) { ctx.fillStyle = `rgba(8,10,20,${a / 255})`; ctx.fillRect(0, 0, W, H); }
+  telas() {
+    if (this.estado === "vitoria" || this.estado === "derrota") {
+      this.veu(170); const ok = this.estado === "vitoria";
+      texto(ok ? "VOCÊ ESCAPOU!" : this.motivo, 56, ok ? "#78ff96" : "#ff5050", 500, 200);
+      if (ok) {
+        const t = Math.floor(this.t), pts = Math.max(0, this.dinheiro * 300 + Math.floor(this.tempo) * 3 - this.alertas * 50);
+        [`DINHEIRO ROUBADO: $${(this.dinheiro * 10000).toLocaleString("pt-BR")}`,
+         `TEMPO: ${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`,
+         `ALERTAS: ${this.alertas}`, `PONTUAÇÃO: ${pts}`].forEach((l, i) => texto(l, 28, "#ffe678", 500, 290 + i * 44));
+      }
+      texto("ENTER → " + (ok ? "Jogar novamente (mais difícil)" : "Tentar novamente") + "     ESC → Menu", 22, "#e6e6f0", 500, 520);
+    } else if (this.estado === "menu") {
+      ctx.drawImage(BG, 0, 0); this.veu(215);
+      texto("FUGA DO BANCO", 72, "#ffd746", 500, 150);
+      texto("roube 3 sacos, evite guardas e câmeras, escape", 18, "#b4b9d2", 500, 215);
+      ["JOGAR", "COMO JOGAR", "SAIR"].forEach((o, i) => texto(i === this.sel ? `[ ${o} ]` : o, 34, i === this.sel ? "#fff" : "#8287a0", 500, 320 + i * 70));
+      texto("W/S ou setas + ENTER", 16, "#8287a0", 500, 640);
+    } else if (this.estado === "ajuda") {
+      ctx.drawImage(BG, 0, 0); this.veu(225); texto("COMO JOGAR", 48, "#ffd746", 500, 120);
+      ["WASD - mover", "E - pegar o saco de dinheiro (fique perto)", "Fuja dos cones de visão de guardas e câmeras",
+       "A barra ALERTA enche quando você é visto", "Alerta cheio = guardas por perto te perseguem",
+       "Pegue os 3 sacos e vá até a SAÍDA verde", "ESC - voltar ao menu"].forEach((l, i) => texto(l, 24, "#e1e1f0", 500, 220 + i * 50));
+    }
+  }
+  tecla(code) {
+    if (code === "Escape") { if (this.estado === "menu") { this.estado = "bye"; return; } this.estado = "menu"; return; }
+    if (this.estado === "menu") {
+      this.sel = (this.sel + (code === "KeyS" || code === "ArrowDown") - (code === "KeyW" || code === "ArrowUp") + 3) % 3;
+      if (code === "Enter" || code === "Space") {
+        if (this.sel === 0) { this.nivel = 0; this.novoJogo(); } else if (this.sel === 1) this.estado = "ajuda";
+        else this.estado = "bye";
+      }
+    } else if (this.estado === "jogo" && code === "KeyE") this.coletar();
+    else if ((this.estado === "vitoria" || this.estado === "derrota") && code === "Enter") {
+      if (this.estado === "vitoria") this.nivel++;
+      this.novoJogo();
+    }
+  }
+  frame(dt) {
+    while (apertou.length) this.tecla(apertou.shift());
+    if (this.estado === "bye") { ctx.fillStyle = "#0b0d14"; ctx.fillRect(0, 0, W, H); texto("Obrigado por jogar! Recarregue a página para jogar de novo.", 22, "#b4b9d2", 500, 350); return; }
+    if (this.estado === "jogo") this.update(dt);
+    if (["jogo", "vitoria", "derrota"].includes(this.estado)) { this.desenharJogo(); this.efeitos(dt); }
+    this.telas();
+  }
+}
+function poligono(pts, cor) {
+  ctx.fillStyle = cor; ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.closePath(); ctx.fill();
+}
+
+const jogo = new Game(); window.jogo = jogo;
+addEventListener("keydown", e => {
+  if (["ArrowUp", "ArrowDown", "Space", "Enter"].includes(e.code)) e.preventDefault();
+  if (!e.repeat) { keys.add(e.code); apertou.push(e.code); }
+});
+addEventListener("keyup", e => keys.delete(e.code));
+addEventListener("blur", () => keys.clear());
+cv.focus();
+let ultimo = performance.now();
+(function loop(agora) {
+  const dt = Math.min((agora - ultimo) / 1000, .05); ultimo = agora;
+  jogo.frame(dt); requestAnimationFrame(loop);
+})(ultimo);
+</script>
+</body>
+</html>

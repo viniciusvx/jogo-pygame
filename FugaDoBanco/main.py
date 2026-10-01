@@ -25,7 +25,8 @@ def centro(c, r): return (c * T + T / 2, r * T + T / 2 + TOP)
 def tile(p): return int(p[0] // T), int((p[1] - TOP) // T)
 def solido(c, r): return not (0 <= c < COLS and 0 <= r < ROWS) or MAPA[r][c] in "#D"
 def mover(pos, dx, dy, meio=10):   # move por eixo: desliza nas paredes
-    for novo in ((pos[0] + dx, pos[1]), (pos[0], pos[1] + dy)):
+    for ddx, ddy in ((dx, 0), (0, dy)):
+        novo = (pos[0] + ddx, pos[1] + ddy)
         if not any(solido(*tile((novo[0] + sx * meio, novo[1] + sy * meio))) for sx in (-1, 1) for sy in (-1, 1)):
             pos = list(novo)
     return pos
@@ -112,8 +113,7 @@ class Camera:
     def angulo(self, t): return self.mid + self.amp * math.sin(t * .8 * self.mult)
 class Game:
     def __init__(self):
-        pygame.init()
-        pygame.display.set_caption("Fuga do Banco")
+        pygame.init(); pygame.display.set_caption("Fuga do Banco")
         try: pygame.mixer.init(22050, -16, 1)
         except pygame.error: pass
         self.tela, self.clock, self.fontes = pygame.display.set_mode((W, H)), pygame.time.Clock(), {}
