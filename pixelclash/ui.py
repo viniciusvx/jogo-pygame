@@ -69,7 +69,7 @@ def brilho_texto(fonte, txt, cor):
         grande.blit(base, (20, 20))
         pequeno = pygame.transform.smoothscale(grande, (max(1, grande.get_width() // 5), max(1, grande.get_height() // 5)))
         img = pygame.transform.smoothscale(pequeno, grande.get_size())
-        img.blit(img, (0, 0), special_flags=pygame.BLEND_ADD)
+        img.blit(img.copy(), (0, 0), special_flags=pygame.BLEND_ADD)
         _cache_brilho[chave] = img
     return img
 
@@ -79,7 +79,6 @@ def desenhar_neon(surf, fonte, txt, cor, pos, t=0, ancora="center"):
     halo = brilho_texto(fonte, txt, cor)
     r = halo.get_rect()
     setattr(r, ancora, pos)
-    halo.set_alpha(None)
     surf.blit(halo, r, special_flags=pygame.BLEND_ADD)
     miolo = tuple(min(255, c + 110) for c in cor)
     img = texto(fonte, txt, miolo, None)

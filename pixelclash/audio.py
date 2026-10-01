@@ -61,7 +61,7 @@ class _Sintese:
             a = filtro + (filtro_fim - filtro) * k
             y += a * (random.uniform(-1, 1) - y)
             if subida > 0:   # sobe e desce (whoosh)
-                env = math.sin(math.pi * min(1.0, k / (1 - subida * 0.5)) ** (1 + subida)) if k < 1 else 0
+                env = math.sin(math.pi * k)
             else:
                 env = math.exp(-decaimento * k)
             out[i] = y * vol * env * min(1.0, i / 20)
