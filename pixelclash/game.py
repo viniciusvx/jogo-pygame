@@ -245,8 +245,8 @@ class Game:
         ui.desenhar_texto(surf, self.fontes.pequena, "LUTA LOCAL PARA 2 JOGADORES", ui.CIANO, (cx, 190))
         self.menu.draw(surf, cx, 245, self.t, self.fontes)
         ui.desenhar_texto(surf, self.fontes.mini, "Setas / W S + ENTER  |  Mouse", ui.CINZA, (cx, C.ALTURA - 18))
-        ui.desenhar_neon(surf, self.fontes.media, "BLAZE", C.PERSONAGENS["blaze"]["cor"], (250, 150), self.t)
-        ui.desenhar_neon(surf, self.fontes.media, "FROST", C.PERSONAGENS["frost"]["cor"], (C.LARGURA - 250, 150), self.t)
+        ui.desenhar_neon(surf, self.fontes.media, "BLAZE", C.PERSONAGENS["blaze"]["cor"], (250, 486), self.t)
+        ui.desenhar_neon(surf, self.fontes.media, "FROST", C.PERSONAGENS["frost"]["cor"], (C.LARGURA - 250, 486), self.t)
 
     def _painel_controles(self, surf, jogador, x, y, w):
         perfil = C.PERSONAGENS["blaze" if jogador == 1 else "frost"]
@@ -325,14 +325,14 @@ class Game:
         img = ui.texto(self.fontes.titulo, f"PLAYER {venc} WINS!", perfil["cor_clara"], (20, 10, 40))
         img = pygame.transform.smoothscale(img, (int(img.get_width() * escala), int(img.get_height() * escala)))
         halo = ui.brilho_texto(self.fontes.titulo, f"PLAYER {venc} WINS!", perfil["cor"])
-        surf.blit(halo, halo.get_rect(center=(cx, 130)), special_flags=pygame.BLEND_ADD)
-        surf.blit(img, img.get_rect(center=(cx, 130)))
+        surf.blit(halo, halo.get_rect(center=(cx, 160)), special_flags=pygame.BLEND_ADD)
+        surf.blit(img, img.get_rect(center=(cx, 160)))
         ui.desenhar_texto(surf, self.fontes.grande, f"{m.f1.nome.upper()}  {m.vitorias[0]}  x  {m.vitorias[1]}  {m.f2.nome.upper()}",
-                          ui.BRANCO, (cx, 220))
-        ui.desenhar_texto(surf, self.fontes.pequena, "PLACAR FINAL (melhor de 3)", ui.CINZA, (cx, 258))
+                          ui.BRANCO, (cx, 250))
+        ui.desenhar_texto(surf, self.fontes.pequena, "PLACAR FINAL (melhor de 3)", ui.CINZA, (cx, 288))
         if (self.t // 25) % 2 == 0:
-            ui.desenhar_texto(surf, self.fontes.media, "R  JOGAR DE NOVO", ui.AMARELO, (cx, 330))
-        ui.desenhar_texto(surf, self.fontes.media, "ESC  MENU", ui.CIANO, (cx, 370))
+            ui.desenhar_texto(surf, self.fontes.media, "R  JOGAR DE NOVO", ui.AMARELO, (cx, 350))
+        ui.desenhar_texto(surf, self.fontes.media, "ESC  MENU", ui.CIANO, (cx, 390))
 
     def draw(self):
         s = self.tela

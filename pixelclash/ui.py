@@ -74,6 +74,18 @@ def brilho_texto(fonte, txt, cor):
     return img
 
 
+def _texto_aditivo(fonte, txt, cor):
+    """Texto sobre fundo preto opaco, para BLEND_ADD (alpha por pixel e ignorado no ADD)."""
+    chave = ("add", id(fonte), txt, cor)
+    img = _cache_texto.get(chave)
+    if img is None:
+        base = fonte.render(txt, True, cor)
+        img = pygame.Surface(base.get_size())
+        img.blit(base, (0, 0))
+        _cache_texto[chave] = img
+    return img
+
+
 def desenhar_neon(surf, fonte, txt, cor, pos, t=0, ancora="center"):
     """Texto neon: halo pulsante + miolo claro."""
     halo = brilho_texto(fonte, txt, cor)
@@ -95,8 +107,8 @@ def desenhar_titulo(surf, fontes, cx, y, t):
     desl = 0
     if glitch:
         desl = ((t * 7919) % 17) - 8
-    img_c = texto(f, txt, CIANO, None)
-    img_m = texto(f, txt, MAGENTA, None)
+    img_c = _texto_aditivo(f, txt, CIANO)
+    img_m = _texto_aditivo(f, txt, MAGENTA)
     pulso = 0.5 + 0.5 * math.sin(t * 0.06)
     # halo
     halo = brilho_texto(f, txt, (int(120 + 60 * pulso), 40, int(200 + 40 * pulso)))
@@ -249,7 +261,7 @@ def _pips(surf, vit, lado, y):
     cx = C.LARGURA // 2
     n = C.ROUNDS_PARA_VENCER
     for i in range(n):
-        dx = 78 + i * 22
+        dx = 50 + i * 22
         x = cx - dx if lado == 0 else cx + dx
         cheio = i < vit
         pygame.draw.circle(surf, (10, 10, 24), (x, y), 9)
@@ -278,8 +290,8 @@ def desenhar_hud(surf, match, fontes, t):
     desenhar_texto(surf, fonte, str(seg), cor, caixa.center)
 
     # rounds
-    desenhar_texto(surf, fontes.mini, "P1", CINZA, (cx - 58, _BARRA_Y + 52))
-    desenhar_texto(surf, fontes.mini, "P2", CINZA, (cx + 58, _BARRA_Y + 52))
+    desenhar_texto(surf, fontes.mini, "P1", CINZA, (cx - 100, _BARRA_Y + 52))
+    desenhar_texto(surf, fontes.mini, "P2", CINZA, (cx + 100, _BARRA_Y + 52))
     _pips(surf, match.vitorias[0], 0, _BARRA_Y + 52)
     _pips(surf, match.vitorias[1], 1, _BARRA_Y + 52)
     desenhar_texto(surf, fontes.mini, f"ROUND {match.round}", CINZA, (cx, _BARRA_Y + 52))
@@ -287,7 +299,7 @@ def desenhar_hud(surf, match, fontes, t):
     # combo
     info = match.combo_info
     if info and info.get("n", 0) >= 2:
-        lado = 0 if info.get("lado") in (0, 1) else 1
+        lado = 0 if info.get("lado") == 1 else 1
         n = info["n"]
         k = min(1.0, info.get("t", 30) / 20)
         cor = tuple(int(c * (0.4 + 0.6 * k)) for c in AMARELO)
