@@ -45,7 +45,7 @@ const MAPA = [                                              // # parede, D mesa,
   "########################################"
 ];
 const ROWS = MAPA.length, COLS = MAPA[0].length, MAPW = COLS * T, MAPH = ROWS * T + TOP;
-const NS = 5;                                              // sacos de dinheiro
+const NS = 8;                                              // sacos de dinheiro
 // Salas: [nome, col0, lin0, col1, lin1, cor do piso]
 const SALAS = [["ARQUIVO", 1, 1, 8, 6, [58, 50, 66]], ["GERÊNCIA", 10, 1, 19, 6, [52, 60, 56]], ["SEGURANÇA", 21, 1, 30, 6, [44, 56, 80]],
   ["COFRE", 32, 1, 38, 6, [84, 72, 44]], ["CORREDOR", 1, 8, 38, 9, [62, 66, 84]], ["TESOURARIA", 1, 11, 12, 16, [66, 56, 48]],
@@ -225,7 +225,7 @@ class Game {
     this.guardas = [[[2, 8], [19, 9], [37, 8]], [[2, 19], [19, 18], [37, 19]], [[15, 12], [24, 12], [24, 15], [15, 15]],
                     [[11, 2], [18, 2], [18, 5], [11, 5]], [[32, 22], [36, 22], [36, 24], [32, 24]]].map(r => new Guard(r, m));
     this.cams = [new Camera([1, 1], 10, 80, m), new Camera([38, 1], 100, 170, m), new Camera([1, 11], 10, 80, m), new Camera([38, 11], 100, 170, m)];
-    this.sacos = [[3, 3], [36, 3], [3, 14], [36, 14], [16, 23]].map(t => centro(...t));
+    this.sacos = [[3, 3], [36, 3], [3, 14], [36, 14], [16, 23], [18, 3], [22, 5], [26, 23]].map(t => centro(...t));
     this.dinheiro = 0; this.alerta = 0; this.alertas = 0; this.armado = true;
     this.tempo = TEMPO_BASE + 10 * this.nivel; this.t = 0; this.fx = []; this.pops = []; this.aviso = ""; this.estado = "jogo";
   }
@@ -328,7 +328,7 @@ class Game {
       ctx.drawImage(BG, 0, 0); this.veu(225); texto("COMO JOGAR", 48, "#ffd746", 500, 120);
       ["WASD - mover", "E - pegar o saco de dinheiro (fique perto)", "Fuja dos cones de visão de guardas e câmeras",
        "A barra ALERTA enche quando você é visto", "Alerta cheio = guardas por perto te perseguem",
-       "Pegue os 5 sacos e vá até a SAÍDA verde (veja o minimapa)", "ESC - voltar ao menu"].forEach((l, i) => texto(l, 24, "#e1e1f0", 500, 220 + i * 50));
+       "Pegue todos os sacos e vá até a SAÍDA verde (veja o minimapa)", "ESC - voltar ao menu"].forEach((l, i) => texto(l, 24, "#e1e1f0", 500, 220 + i * 50));
     }
   }
   tecla(code) {
